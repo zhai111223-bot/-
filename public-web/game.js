@@ -885,6 +885,9 @@
   }
 
   window.addEventListener("resize", resize);
+  window.addEventListener("contextmenu", (event) => event.preventDefault());
+  window.addEventListener("selectstart", (event) => event.preventDefault());
+  window.addEventListener("dragstart", (event) => event.preventDefault());
   canvas.addEventListener("pointerdown", onPointerDown);
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("pointercancel", onPointerUp);

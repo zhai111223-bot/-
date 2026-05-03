@@ -10,6 +10,10 @@
 
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 html,
@@ -20,6 +24,7 @@ body {
   overflow: hidden;
   overscroll-behavior: none;
   touch-action: none;
+  -webkit-text-size-adjust: 100%;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.64) 0%, rgba(255, 255, 255, 0) 34%),
     linear-gradient(138deg, #ccefe5 0%, #f7ecd1 46%, #dce9ff 100%);
