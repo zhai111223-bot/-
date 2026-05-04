@@ -471,18 +471,19 @@
       return;
     }
     const held = performance.now() - game.holdStart;
-    const charge = clamp(held / MAX_HOLD, 0, 1);
-    audio.playJump(charge);
+    const rawCharge = clamp(held / MAX_HOLD, 0, 1);
+    const charge = Math.pow(rawCharge, 1.55);
+    audio.playJump(rawCharge);
     const next = game.blocks[game.nextIndex];
     const dx = next.x - game.player.x;
     const dy = next.y - game.player.y;
     const length = Math.hypot(dx, dy) || 1;
     const distance = charge * MAX_JUMP_DISTANCE;
     game.status = "jumping";
-    const flipTurns = charge > 0.72 ? 2 : 1;
+    const flipTurns = rawCharge > 0.72 ? 2 : 1;
     game.jump = {
       elapsed: 0,
-      duration: 360 + charge * 185,
+      duration: 350 + rawCharge * 210,
       startX: game.player.x,
       startY: game.player.y,
       endX: game.player.x + (dx / length) * distance,
@@ -490,7 +491,7 @@
       startRotation: game.player.rotation,
       direction: Math.sign(dx) || 1,
       spin: (Math.sign(dx) || 1) * Math.PI * 2 * flipTurns,
-      power: charge,
+      power: rawCharge,
     };
     game.charge = 0;
     game.player.scaleX = 1;

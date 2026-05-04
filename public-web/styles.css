@@ -101,6 +101,23 @@ button {
   pointer-events: none;
 }
 
+.credit {
+  position: absolute;
+  right: max(18px, env(safe-area-inset-right));
+  bottom: max(14px, calc(env(safe-area-inset-bottom) + 10px));
+  z-index: 6;
+  padding: 7px 10px;
+  border: 1px solid rgba(36, 44, 58, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 10px 26px rgba(56, 70, 89, 0.08);
+  color: rgba(38, 49, 63, 0.76);
+  font-size: 12px;
+  line-height: 1;
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+}
+
 .score-block {
   min-width: 78px;
   padding: 8px 10px 8px;
@@ -243,5 +260,12 @@ button {
   .restart-button {
     min-width: 64px;
     height: 38px;
+  }
+
+  .credit {
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(10px, calc(env(safe-area-inset-bottom) + 8px));
+    padding: 6px 9px;
+    font-size: 11px;
   }
 }
