@@ -4,6 +4,11 @@
   const scoreNode = document.querySelector("#score");
   const bestNode = document.querySelector("#bestScore");
   const restartButton = document.querySelector("#restartButton");
+  const startOverlay = document.querySelector("#startOverlay");
+  const gameoverOverlay = document.querySelector("#gameoverOverlay");
+  const startButton = document.querySelector("#startButton");
+  const againButton = document.querySelector("#againButton");
+  const finalScoreNode = document.querySelector("#finalScore");
   const chargeWrap = document.querySelector(".charge-wrap");
   const chargeBar = document.querySelector("#chargeBar");
   const tip = document.querySelector("#tip");
@@ -11,7 +16,9 @@
   const STORAGE_KEY = "light-jump-best-score";
   const MAX_HOLD = 1120;
   const MAX_JUMP_DISTANCE = 338;
-  const JUMP_ARC = 138;
+  const JUMP_ARC = 152;
+  const ISO_Y = 0.72;
+  const SHADOW_SLOPE = 0.46;
 
   const blockThemes = [
     { top: "#58c6a8", left: "#2c967f", right: "#257b70", trim: "#dffaf0", motif: "petal", tone: 0 },
@@ -45,7 +52,9 @@
     holdStart: 0,
     jump: null,
     fall: null,
+    landImpact: null,
     particles: [],
+    chargeParticleTimer: 0,
     tipTimer: 0,
     player: {
       x: 0,
@@ -91,12 +100,25 @@
     return a + (b - a) * t;
   }
 
+  function moveToward(value, target, step) {
+    if (value < target) {
+      return Math.min(target, value + step);
+    }
+    return Math.max(target, value - step);
+  }
+
   function easeOutCubic(t) {
     return 1 - Math.pow(1 - t, 3);
   }
 
   function easeInOutCubic(t) {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+
+  function easeOutBack(t) {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
   }
 
   function smoothstep(t) {
@@ -108,7 +130,7 @@
   }
 
   function getDifficulty() {
-    return clamp(game.score / 120, 0, 1);
+    return clamp(game.score / 95, 0, 1);
   }
 
   function createAudioController() {
@@ -220,22 +242,23 @@
       const { context, gain, now } = pack;
       const osc = context.createOscillator();
       osc.type = "triangle";
-      osc.frequency.setValueAtTime(280 + power * 420, now);
-      osc.frequency.exponentialRampToValueAtTime(150 + power * 220, now + 0.26 + power * 0.1);
+      osc.frequency.setValueAtTime(220 + power * 520, now);
+      osc.frequency.exponentialRampToValueAtTime(132 + power * 230, now + 0.22 + power * 0.14);
       osc.connect(gain);
       osc.start(now);
       osc.stop(now + 0.34 + power * 0.12);
 
       const click = context.createOscillator();
       const clickGain = context.createGain();
-      click.type = "square";
-      click.frequency.setValueAtTime(92 + power * 90, now);
-      clickGain.gain.setValueAtTime(0.028, now);
-      clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
+      click.type = "sine";
+      click.frequency.setValueAtTime(150 + power * 190, now);
+      click.frequency.exponentialRampToValueAtTime(260 + power * 420, now + 0.06 + power * 0.03);
+      clickGain.gain.setValueAtTime(0.018 + power * 0.018, now);
+      clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08 + power * 0.03);
       click.connect(clickGain);
       clickGain.connect(context.destination);
       click.start(now);
-      click.stop(now + 0.07);
+      click.stop(now + 0.1 + power * 0.04);
 
       const whoosh = context.createBufferSource();
       const whooshGain = context.createGain();
@@ -303,18 +326,30 @@
 
     function playMiss() {
       stopCharge();
-      const pack = makeEnvelope(0.0001, 0.11, 0.0001, 0.28);
+      const pack = makeEnvelope(0.0001, 0.065, 0.0001, 0.42);
       if (!pack) {
         return;
       }
       const { context, gain, now } = pack;
       const osc = context.createOscillator();
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(150, now);
-      osc.frequency.exponentialRampToValueAtTime(62, now + 0.24);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(230, now);
+      osc.frequency.exponentialRampToValueAtTime(128, now + 0.36);
       osc.connect(gain);
       osc.start(now);
-      osc.stop(now + 0.3);
+      osc.stop(now + 0.44);
+
+      const soft = context.createOscillator();
+      const softGain = context.createGain();
+      soft.type = "triangle";
+      soft.frequency.setValueAtTime(172, now + 0.03);
+      soft.frequency.exponentialRampToValueAtTime(96, now + 0.34);
+      softGain.gain.setValueAtTime(0.022, now + 0.03);
+      softGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+      soft.connect(softGain);
+      softGain.connect(context.destination);
+      soft.start(now + 0.03);
+      soft.stop(now + 0.42);
     }
 
     function playBack() {
@@ -381,21 +416,21 @@
     canvas.width = Math.floor(width * dpr);
     canvas.height = Math.floor(height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    game.view.baseY = height < 620 ? height * 0.68 : height * 0.63;
+    game.view.baseY = height < 620 ? height * 0.72 : height * 0.67;
     updateViewTarget(true);
   }
 
   function makeBlock(x, y, index, start = false) {
     const theme = blockThemes[index % blockThemes.length];
     const difficulty = getDifficulty();
-    const radius = start ? 54 : rand(46 - difficulty * 13, 58 - difficulty * 15);
+    const radius = start ? 68 : rand(54 - difficulty * 18, 72 - difficulty * 24);
     const shape = start ? "cube" : blockShapes[(index - 1) % blockShapes.length];
-    const depth = shape === "disc" ? rand(20, 28) : rand(27, 38 - difficulty * 6);
+    const depth = shape === "disc" ? rand(27, 36 - difficulty * 5) : rand(38, 52 - difficulty * 8);
     return {
       x,
       y,
       radius: Math.max(32, radius),
-      depth: start ? 34 : depth,
+      depth: start ? 46 : depth,
       shape,
       colors: theme,
       index,
@@ -404,24 +439,34 @@
       revealed: start,
       pulse: start ? 0.8 : 0,
       wobble: 0,
+      squash: 0,
+      appear: start ? 1 : 0,
     };
   }
 
   function makeNextBlock(from, index) {
     const difficulty = getDifficulty();
     const direction = Math.random() > 0.5 ? 1 : -1;
-    const distance = rand(152 + difficulty * 18, 246 + difficulty * 44);
-    const rise = rand(54, 96 + difficulty * 14);
+    const roll = Math.random();
+    let distance = 0;
+    if (roll < 0.28) {
+      distance = rand(96 + difficulty * 8, 148 + difficulty * 16);
+    } else if (roll < 0.72) {
+      distance = rand(150 + difficulty * 14, 238 + difficulty * 28);
+    } else {
+      distance = rand(240 + difficulty * 16, 322 + difficulty * 16);
+    }
+    const rise = rand(46, 104 + difficulty * 20);
     return makeBlock(from.x + direction * distance, from.y - rise, index);
   }
 
-  function resetGame() {
+  function resetGame(showMenu = false) {
     const first = makeBlock(0, 0, 0, true);
     const second = makeNextBlock(first, 1);
     game.blocks = [first, second];
     game.currentIndex = 0;
     game.nextIndex = 1;
-    game.status = "ready";
+    game.status = showMenu ? "menu" : "ready";
     game.score = 0;
     game.combo = 0;
     game.centerBonus = 0;
@@ -429,7 +474,9 @@
     game.holdStart = 0;
     game.jump = null;
     game.fall = null;
+    game.landImpact = null;
     game.particles = [];
+    game.chargeParticleTimer = 0;
     game.tipTimer = 0;
     game.player.x = first.x;
     game.player.y = first.y;
@@ -439,10 +486,24 @@
     game.player.scaleY = 1;
     game.player.alpha = 1;
     scoreNode.textContent = "0";
+    scoreNode.classList.remove("score-pop");
+    finalScoreNode.textContent = "0";
     restartButton.hidden = true;
+    startOverlay.classList.toggle("is-hidden", !showMenu);
+    gameoverOverlay.classList.add("is-hidden");
     hideTip();
     setChargeVisible(false);
     updateViewTarget(true);
+  }
+
+  function startGame() {
+    resetGame(false);
+  }
+
+  function showGameOver() {
+    finalScoreNode.textContent = String(game.score);
+    restartButton.hidden = true;
+    gameoverOverlay.classList.remove("is-hidden");
   }
 
   function updateViewTarget(immediate = false) {
@@ -451,8 +512,8 @@
     }
     const current = game.blocks[game.currentIndex] || game.blocks[0];
     const next = game.blocks[game.nextIndex] || current;
-    game.view.targetX = (current.x + next.x) / 2;
-    game.view.targetY = (current.y + next.y) / 2 - 22;
+    game.view.targetX = current.x * 0.52 + next.x * 0.48;
+    game.view.targetY = current.y * 0.56 + next.y * 0.44 - 36;
     if (immediate) {
       game.view.x = game.view.targetX;
       game.view.y = game.view.targetY;
@@ -462,7 +523,7 @@
   function worldToScreen(point) {
     return {
       x: point.x - game.view.x + width / 2,
-      y: point.y - game.view.y + game.view.baseY,
+      y: (point.y - game.view.y) * ISO_Y + game.view.baseY,
     };
   }
 
@@ -483,15 +544,21 @@
     game.tipTimer = 980;
   }
 
+  function popScore() {
+    scoreNode.classList.remove("score-pop");
+    void scoreNode.offsetWidth;
+    scoreNode.classList.add("score-pop");
+  }
+
   function startCharge() {
     if (game.status === "gameover") {
-      resetGame();
       return;
     }
     if (game.status !== "ready") {
       return;
     }
     game.status = "charging";
+    game.landImpact = null;
     game.holdStart = performance.now();
     game.charge = 0;
     game.player.scaleX = 1;
@@ -508,7 +575,8 @@
     }
     const held = performance.now() - game.holdStart;
     const rawCharge = clamp(held / MAX_HOLD, 0, 1);
-    const charge = Math.pow(rawCharge, 1.55);
+    const tunedCharge = clamp((rawCharge - 0.035) / 0.965, 0, 1);
+    const charge = Math.pow(tunedCharge, 1.72);
     audio.playJump(rawCharge);
     haptics.jump(rawCharge);
     const next = game.blocks[game.nextIndex];
@@ -516,22 +584,27 @@
     const dy = next.y - game.player.y;
     const length = Math.hypot(dx, dy) || 1;
     const distance = charge * MAX_JUMP_DISTANCE;
+    const effectPower = clamp(distance / MAX_JUMP_DISTANCE, 0, 1);
     game.status = "jumping";
-    const flipTurns = rawCharge > 0.72 ? 2 : 1;
+    const current = game.blocks[game.currentIndex];
+    if (current) {
+      current.squash = -0.15 - rawCharge * 0.13;
+    }
     game.jump = {
       elapsed: 0,
-      duration: 350 + rawCharge * 210,
+      duration: 330 + rawCharge * 240,
       startX: game.player.x,
       startY: game.player.y,
       endX: game.player.x + (dx / length) * distance,
       endY: game.player.y + (dy / length) * distance,
       startRotation: game.player.rotation,
       direction: Math.sign(dx) || 1,
-      spin: (Math.sign(dx) || 1) * Math.PI * 2 * flipTurns,
+      spin: (Math.sign(dx) || 1) * Math.PI * 2,
       power: rawCharge,
+      effectPower,
       trailTimer: 0,
     };
-    takeoffDust(game.jump.startX, game.jump.startY, rawCharge);
+    takeoffDust(game.jump.startX, game.jump.startY, effectPower);
     game.charge = 0;
     game.player.scaleX = 1;
     game.player.scaleY = 1;
@@ -565,7 +638,8 @@
     if (nextLanding.isOnTop) {
       const { block, centerDistance } = nextLanding;
       let gain = 1;
-      if (centerDistance < 0.18) {
+      const centerLimit = 0.18 + getDifficulty() * 0.06;
+      if (centerDistance < centerLimit) {
         game.combo += 1;
         game.centerBonus += 2;
         gain = 1 + game.centerBonus;
@@ -575,8 +649,7 @@
         showTip(game.combo > 1 ? `中心连跳 +${gain}` : `中心 +${gain}`);
         audio.playLand("perfect", block.tone);
         haptics.land(true);
-        burst(block.x, block.y, block.colors.trim, 26);
-        ring(block.x, block.y, block.radius);
+        centerCelebration(block, game.combo);
       } else {
         game.combo = 0;
         game.centerBonus = 0;
@@ -588,6 +661,7 @@
 
       game.score += gain;
       scoreNode.textContent = String(game.score);
+      popScore();
       if (game.score > bestScore) {
         bestScore = game.score;
         bestNode.textContent = String(bestScore);
@@ -628,10 +702,10 @@
     haptics.miss();
   }
 
-  function burst(x, y, color, count) {
+  function burst(x, y, color, count, delay = 0, spread = 1) {
     for (let i = 0; i < count; i += 1) {
       const angle = rand(0, Math.PI * 2);
-      const speed = rand(26, 82);
+      const speed = rand(26, 82) * spread;
       game.particles.push({
         x,
         y,
@@ -642,11 +716,12 @@
         size: rand(2, 5),
         color,
         type: "spark",
+        delay,
       });
     }
   }
 
-  function ring(x, y, radius) {
+  function ring(x, y, radius, delay = 0) {
     game.particles.push({
       x,
       y,
@@ -655,13 +730,62 @@
       maxLife: 520,
       color: "rgba(255, 250, 190, 0.9)",
       type: "ring",
+      delay,
     });
+  }
+
+  function startLandingImpact(block, perfect) {
+    game.landImpact = {
+      block,
+      elapsed: 0,
+      duration: perfect ? 260 : 210,
+      amount: perfect ? 0.36 : 0.24,
+    };
+  }
+
+  function updateLandingImpact(dt) {
+    if (!game.landImpact) {
+      return;
+    }
+    const impact = game.landImpact;
+    impact.elapsed += dt;
+    const t = clamp(impact.elapsed / impact.duration, 0, 1);
+    const downPoint = 0.46;
+    const squash =
+      t < downPoint ? impact.amount * (t / downPoint) : impact.amount * (1 - (t - downPoint) / (1 - downPoint));
+
+    if (impact.block) {
+      impact.block.squash = Math.max(0, squash);
+    }
+    if (game.status === "ready") {
+      game.player.scaleX = 1 + squash * 0.78;
+      game.player.scaleY = 1 - squash * 0.68;
+    }
+    if (t >= 1) {
+      if (impact.block) {
+        impact.block.squash = 0;
+      }
+      if (game.status === "ready") {
+        game.player.scaleX = 1;
+        game.player.scaleY = 1;
+      }
+      game.landImpact = null;
+    }
+  }
+
+  function centerCelebration(block, combo) {
+    for (let i = 0; i < combo; i += 1) {
+      const delay = i * 115;
+      ring(block.x, block.y, block.radius * (1.08 + i * 0.08), delay);
+      burst(block.x, block.y, block.colors.trim, 18 + i * 3, delay, 1 + i * 0.06);
+    }
   }
 
   function revealBlock(block, perfect) {
     block.revealed = true;
     block.pulse = perfect ? 1.35 : 0.9;
     block.wobble = perfect ? 1 : 0.55;
+    startLandingImpact(block, perfect);
     for (let i = 0; i < (perfect ? 16 : 8); i += 1) {
       const angle = (Math.PI * 2 * i) / (perfect ? 16 : 8);
       game.particles.push({
@@ -674,6 +798,37 @@
         size: rand(2, 4),
         color: block.colors.trim,
         type: "spark",
+        delay: 0,
+      });
+    }
+  }
+
+  function emitChargeParticles() {
+    const power = game.charge;
+    if (power <= 0.02) {
+      return;
+    }
+    const count = 2 + Math.floor(power * 8);
+    const radiusBase = lerp(78, 13, power);
+    for (let i = 0; i < count; i += 1) {
+      const angle = rand(0, Math.PI * 2);
+      const radius = radiusBase + rand(-8, 14);
+      const startX = game.player.x + Math.cos(angle) * radius;
+      const startY = game.player.y + Math.sin(angle) * radius * 0.36;
+      game.particles.push({
+        x: startX,
+        y: startY,
+        targetX: game.player.x + rand(-3, 3),
+        targetY: game.player.y + rand(-3, 4),
+        screenOffsetY: -28 + rand(-10, 6),
+        vx: 0,
+        vy: 0,
+        life: 300 + power * 220,
+        maxLife: 520,
+        size: rand(1.8, 3.9) * (0.84 + power * 1.05),
+        color: i % 2 ? "rgba(255, 239, 172, 0.9)" : "rgba(108, 221, 205, 0.84)",
+        type: "charge",
+        delay: 0,
       });
     }
   }
@@ -693,6 +848,7 @@
         size: rand(2.2, 4.8) * (0.8 + power * 0.6),
         color: i % 2 ? "rgba(255, 241, 181, 0.9)" : "rgba(102, 221, 198, 0.82)",
         type: "trail",
+        delay: 0,
       });
     }
   }
@@ -701,12 +857,13 @@
     if (!game.jump) {
       return;
     }
-    const power = game.jump.power;
+    const power = game.jump.effectPower;
     const count = power > 0.72 ? 3 : 2;
     for (let i = 0; i < count; i += 1) {
       game.particles.push({
         x: game.player.x - game.jump.direction * rand(7, 18),
         y: game.player.y + rand(-7, 7),
+        screenOffsetY: -30 + rand(-16, 6),
         vx: -game.jump.direction * rand(10, 34),
         vy: rand(-14, 14),
         life: rand(250, 430),
@@ -714,6 +871,7 @@
         size: rand(2, 4.6) * (0.8 + power * 0.72),
         color: i % 2 ? "rgba(255, 246, 176, 0.9)" : "rgba(110, 224, 206, 0.84)",
         type: "trail",
+        delay: 0,
       });
     }
   }
@@ -733,11 +891,21 @@
       game.charge = clamp((performance.now() - game.holdStart) / MAX_HOLD, 0, 1);
       audio.updateCharge(game.charge);
       chargeBar.style.transform = `scaleX(${game.charge})`;
-      const squash = game.charge * 0.13;
-      game.player.scaleX = 1 + squash * 0.46;
-      game.player.scaleY = 1 - squash;
+      const squash = game.charge * 0.31;
+      game.player.scaleX = 1 + squash * 0.78;
+      game.player.scaleY = 1 - squash * 0.92;
+      const current = game.blocks[game.currentIndex];
+      if (current) {
+        current.squash = squash;
+      }
+      game.chargeParticleTimer -= dt;
+      if (game.chargeParticleTimer <= 0) {
+        game.chargeParticleTimer = 88 - game.charge * 68;
+        emitChargeParticles();
+      }
     } else {
       chargeBar.style.transform = "scaleX(0)";
+      game.chargeParticleTimer = 0;
     }
 
     if (game.status === "jumping" && game.jump) {
@@ -750,6 +918,11 @@
       game.player.z = Math.sin(t * Math.PI) * JUMP_ARC * (0.82 + game.jump.power * 0.18);
       game.player.rotation =
         game.jump.startRotation + game.jump.spin * spinEase + Math.sin(t * Math.PI) * 0.05 * game.jump.direction;
+      const spring = Math.max(0, 1 - t * 5.4) * (0.16 + game.jump.power * 0.08);
+      const airStretch = Math.sin(t * Math.PI) * (0.1 + game.jump.power * 0.055);
+      const landingSquash = t > 0.72 ? ((t - 0.72) / 0.28) * (0.12 + game.jump.power * 0.065) : 0;
+      game.player.scaleX = 1 - spring * 0.45 - airStretch * 0.55 + landingSquash * 1.25;
+      game.player.scaleY = 1 + spring * 1.65 + airStretch * 1.18 - landingSquash * 1.1;
       game.jump.trailTimer -= dt;
       if (t < 0.92 && game.jump.trailTimer <= 0) {
         game.jump.trailTimer = 42 - game.jump.power * 18;
@@ -758,6 +931,8 @@
       if (t >= 1) {
         game.player.z = 0;
         game.player.rotation = 0;
+        game.player.scaleX = 1;
+        game.player.scaleY = 1;
         evaluateLanding();
       }
     }
@@ -771,12 +946,23 @@
       if (t >= 1) {
         game.status = "gameover";
         game.player.rotation = 0;
-        restartButton.hidden = false;
         showTip(`本局 ${game.score} 分`);
+        showGameOver();
       }
     }
 
+    updateLandingImpact(dt);
+
     for (const block of game.blocks) {
+      block.appear = Math.min(1, (block.appear || 0) + dt / 420);
+      const isChargingBlock = game.status === "charging" && block === game.blocks[game.currentIndex];
+      const isImpactBlock = game.landImpact && game.landImpact.block === block;
+      if (!isChargingBlock && !isImpactBlock) {
+        block.squash = moveToward(block.squash || 0, 0, dt * 0.00135);
+        if (Math.abs(block.squash) < 0.002) {
+          block.squash = 0;
+        }
+      }
       block.pulse = Math.max(0, block.pulse - dt / 520);
       block.wobble = Math.max(0, block.wobble - dt / 420);
     }
@@ -786,15 +972,22 @@
 
   function updateParticles(dt) {
     for (const particle of game.particles) {
+      if (particle.delay > 0) {
+        particle.delay -= dt;
+        continue;
+      }
       particle.life -= dt;
       if (particle.type === "spark" || particle.type === "trail") {
         const seconds = dt / 1000;
         particle.x += particle.vx * seconds;
         particle.y += particle.vy * seconds;
         particle.vy += (particle.type === "spark" ? 80 : 24) * seconds;
+      } else if (particle.type === "charge") {
+        particle.x += (particle.targetX - particle.x) * 0.11;
+        particle.y += (particle.targetY - particle.y) * 0.11;
       }
     }
-    game.particles = game.particles.filter((particle) => particle.life > 0);
+    game.particles = game.particles.filter((particle) => particle.life > 0 || particle.delay > 0);
   }
 
   function draw() {
@@ -808,56 +1001,94 @@
 
     drawParticles();
     drawPlayer();
+    drawChargeAura();
+  }
+
+  function drawChargeAura() {
+    if (game.status !== "charging" || game.charge <= 0.02) {
+      return;
+    }
+    const p = worldToScreen(game.player);
+    const anchorY = p.y - 32;
+    const power = game.charge;
+    const now = performance.now() * 0.005;
+    const count = 10 + Math.floor(power * 18);
+    const radius = lerp(62, 20, power);
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < count; i += 1) {
+      const phase = i / count;
+      const a = phase * Math.PI * 2 + now * (0.35 + power * 0.45);
+      const pulse = 0.72 + Math.sin(now * 2.2 + i) * 0.28;
+      const x = p.x + Math.cos(a) * radius * (0.72 + phase * 0.18);
+      const y = anchorY + Math.sin(a) * radius * 0.36 * pulse - power * 3;
+      ctx.globalAlpha = (0.4 + power * 0.5) * pulse;
+      ctx.fillStyle = i % 3 === 0 ? "#ffe25e" : "#21d8c2";
+      ctx.beginPath();
+      ctx.arc(x, y, (3.2 + power * 4.6) * pulse, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 0.34 + power * 0.36;
+    ctx.strokeStyle = "#ffe25e";
+    ctx.lineWidth = 2 + power * 1.8;
+    ctx.beginPath();
+    ctx.ellipse(p.x, anchorY, radius * 0.72, radius * 0.28, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   function drawBackdrop() {
     ctx.save();
-    ctx.globalAlpha = 0.26;
+    const bg = ctx.createLinearGradient(0, 0, 0, height);
+    bg.addColorStop(0, "#d5d8df");
+    bg.addColorStop(0.56, "#c9cdd5");
+    bg.addColorStop(1, "#b9bec8");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, width, height);
+    ctx.globalAlpha = 0.1;
     ctx.fillStyle = "#ffffff";
     ctx.beginPath();
-    ctx.moveTo(0, height * 0.56);
-    ctx.lineTo(width, height * 0.46);
-    ctx.lineTo(width, height);
-    ctx.lineTo(0, height);
-    ctx.closePath();
+    ctx.ellipse(width * 0.52, height * 0.4, width * 0.64, height * 0.36, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
     ctx.save();
+    const groundY = height * 0.58;
+    const ground = ctx.createLinearGradient(0, groundY, 0, height);
+    ground.addColorStop(0, "rgba(64, 70, 82, 0.08)");
+    ground.addColorStop(1, "rgba(64, 70, 82, 0.2)");
+    ctx.fillStyle = ground;
+    ctx.fillRect(0, groundY, width, height - groundY);
     ctx.globalAlpha = 0.18;
-    ctx.fillStyle = "#79b8aa";
-    for (let i = -2; i < 7; i += 1) {
-      const y = height * 0.56 + i * 86 - (game.view.y % 86);
+    ctx.strokeStyle = "#9aa0ad";
+    ctx.lineWidth = 1;
+    for (let i = -8; i < 12; i += 1) {
+      const y = groundY + i * 54 - (game.view.y * ISO_Y) % 54;
       ctx.beginPath();
-      ctx.moveTo(-80, y);
-      ctx.lineTo(width + 80, y - 72);
-      ctx.lineTo(width + 80, y - 36);
-      ctx.lineTo(-80, y + 36);
-      ctx.closePath();
-      ctx.fill();
+      ctx.moveTo(-160, y + 70);
+      ctx.lineTo(width + 160, y - (width + 320) * SHADOW_SLOPE + 70);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 0.12;
+    for (let i = -8; i < 12; i += 1) {
+      const y = groundY + i * 64 + (game.view.x * 0.18) % 64;
+      ctx.beginPath();
+      ctx.moveTo(-160, y - (width + 320) * 0.16);
+      ctx.lineTo(width + 160, y + (width + 320) * SHADOW_SLOPE - 130);
+      ctx.stroke();
     }
     ctx.restore();
 
     ctx.save();
-    ctx.globalAlpha = 0.32;
+    ctx.globalAlpha = 0.12;
     ctx.fillStyle = "#ffffff";
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 5; i += 1) {
       const x = ((i * 211 - game.view.x * 0.18) % (width + 240)) - 120;
       const y = 72 + ((i * 47 - game.view.y * 0.08) % Math.max(height * 0.48, 260));
       drawSoftCloud(x, y, 36 + (i % 3) * 13);
-    }
-    ctx.restore();
-
-    ctx.save();
-    ctx.globalAlpha = 0.13;
-    ctx.strokeStyle = "#4f6f69";
-    ctx.lineWidth = 1;
-    for (let i = -4; i < 12; i += 1) {
-      const y = height * 0.72 + i * 42 - (game.view.y % 42);
-      ctx.beginPath();
-      ctx.moveTo(-40, y);
-      ctx.lineTo(width + 40, y - 64);
-      ctx.stroke();
     }
     ctx.restore();
   }
@@ -870,20 +1101,74 @@
     ctx.fill();
   }
 
-  function drawRoundBlock(block, p, r, h, d, pulse, wobble) {
+  function getBlockVisual(block) {
+    const base = worldToScreen(block);
+    const appear = clamp(block.appear ?? 1, 0, 1);
+    const pop = easeOutBack(appear);
+    const scale = clamp(0.72 + pop * 0.28, 0.68, 1.08);
+    const squash = block.squash || 0;
+    return {
+      p: {
+        x: base.x,
+        y: base.y - (1 - appear) * 58 + Math.max(pop - 1, 0) * 10 + squash * 18,
+      },
+      r: block.radius * scale * (1 + squash * 0.56),
+      h: block.radius * 0.56 * scale * (1 - squash * 0.78),
+      d: block.depth * scale * (1 - squash * 0.5),
+      squash,
+    };
+  }
+
+  function translatePoint(point, offset) {
+    return {
+      x: point.x + offset.x,
+      y: point.y + offset.y,
+    };
+  }
+
+  function drawBlockShadow(p, r, h, d, squash, strength = 1) {
+    const press = clamp(squash, -0.3, 0.42);
+    const castLength = r * (1.18 + press * 0.34);
+    const offset = { x: -castLength, y: castLength * SHADOW_SLOPE };
+    const footprint = [
+      { x: p.x, y: p.y - h + d },
+      { x: p.x - r, y: p.y + d },
+      { x: p.x, y: p.y + h + d },
+      { x: p.x + r, y: p.y + d },
+    ];
+
+    ctx.save();
+    ctx.globalAlpha = 0.24 * strength;
+    ctx.fillStyle = "#767d89";
+    drawPolygon([
+      footprint[0],
+      footprint[1],
+      footprint[2],
+      footprint[3],
+      translatePoint(footprint[3], offset),
+      translatePoint(footprint[2], offset),
+      translatePoint(footprint[1], offset),
+      translatePoint(footprint[0], offset),
+    ]);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = 0.18 * strength;
+    ctx.fillStyle = "#5f6672";
+    drawPolygon(footprint);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawRoundBlock(block, p, r, h, d, pulse, wobble, squash) {
     const isDisc = block.shape === "disc";
     const rx = r * (isDisc ? 1.04 : 0.86);
     const ry = h * (isDisc ? 0.72 : 0.82);
     const topY = p.y + wobble;
     const bottomY = topY + d + (isDisc ? 4 : 10);
 
-    ctx.save();
-    ctx.globalAlpha = 0.18;
-    ctx.fillStyle = "#263835";
-    ctx.beginPath();
-    ctx.ellipse(p.x + r * 0.16, bottomY + ry * 0.9, rx * 1.08, ry * 0.46, -0.03, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    drawBlockShadow({ x: p.x, y: topY }, rx, ry, d, squash, isDisc ? 0.88 : 1);
 
     ctx.save();
     const sideGradient = ctx.createLinearGradient(p.x - rx, topY, p.x + rx, bottomY + ry);
@@ -899,7 +1184,7 @@
     ctx.closePath();
     ctx.fill();
 
-    ctx.globalAlpha = 0.16;
+    ctx.globalAlpha = 0.28;
     ctx.fillStyle = "#142a2b";
     ctx.beginPath();
     ctx.ellipse(p.x, bottomY, rx, ry, 0, 0, Math.PI);
@@ -915,13 +1200,13 @@
     ctx.ellipse(p.x, topY, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.lineWidth = 1.6;
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(35, 42, 51, 0.2)";
     ctx.beginPath();
     ctx.ellipse(p.x, topY, rx, ry, 0, 0, Math.PI * 2);
     ctx.stroke();
 
-    ctx.globalAlpha = 0.36;
+    ctx.globalAlpha = 0.42;
     ctx.strokeStyle = "rgba(255, 255, 255, 0.72)";
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -949,19 +1234,13 @@
     ctx.restore();
   }
 
-  function drawPrismBlock(block, p, r, h, d, pulse, wobble) {
+  function drawPrismBlock(block, p, r, h, d, pulse, wobble, squash) {
     const top = { x: p.x, y: p.y - h * 0.92 + wobble };
     const left = { x: p.x - r * 0.98, y: p.y + h * 0.18 + wobble };
     const right = { x: p.x + r * 0.98, y: p.y + h * 0.18 + wobble };
     const front = { x: p.x, y: p.y + h * 0.92 + wobble };
 
-    ctx.save();
-    ctx.globalAlpha = 0.18;
-    ctx.fillStyle = "#263835";
-    ctx.beginPath();
-    ctx.ellipse(p.x + r * 0.12, p.y + h + d + 16, r * 1.04, r * 0.26, -0.04, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    drawBlockShadow(p, r, h, d, squash);
 
     ctx.save();
     ctx.fillStyle = block.colors.left;
@@ -990,8 +1269,8 @@
     drawPolygon([top, right, front, left]);
     ctx.fill();
 
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.42)";
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(35, 42, 51, 0.2)";
     drawPolygon([top, right, front, left]);
     ctx.stroke();
 
@@ -1025,19 +1304,21 @@
   }
 
   function drawBlock(block) {
-    const p = worldToScreen(block);
-    const r = block.radius;
-    const h = r * 0.54;
-    const d = block.depth;
+    const visual = getBlockVisual(block);
+    const p = visual.p;
+    const r = visual.r;
+    const h = visual.h;
+    const d = visual.d;
+    const squash = visual.squash;
     const pulse = block.pulse || 0;
     const wobble = Math.sin((1 - (block.wobble || 0)) * Math.PI * 3) * (block.wobble || 0) * 2;
 
     if (block.shape === "cylinder" || block.shape === "disc") {
-      drawRoundBlock(block, p, r, h, d, pulse, wobble);
+      drawRoundBlock(block, p, r, h, d, pulse, wobble, squash);
       return;
     }
     if (block.shape === "prism") {
-      drawPrismBlock(block, p, r, h, d, pulse, wobble);
+      drawPrismBlock(block, p, r, h, d, pulse, wobble, squash);
       return;
     }
 
@@ -1046,13 +1327,7 @@
     const top = { x: p.x, y: p.y - h + wobble };
     const bottom = { x: p.x, y: p.y + h + wobble };
 
-    ctx.save();
-    ctx.globalAlpha = 0.16;
-    ctx.fillStyle = "#263835";
-    ctx.beginPath();
-    ctx.ellipse(p.x + 5, p.y + h + d + 15, r * 1.02, r * 0.28, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    drawBlockShadow(p, r, h, d, squash);
 
     ctx.save();
     ctx.fillStyle = block.colors.left;
@@ -1073,6 +1348,25 @@
     ]);
     ctx.fill();
 
+    ctx.globalAlpha = 0.42;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.74)";
+    drawPolygon([
+      { x: left.x, y: left.y + d * 0.36 },
+      { x: bottom.x, y: bottom.y + d * 0.36 },
+      { x: bottom.x, y: bottom.y + d * 0.58 },
+      { x: left.x, y: left.y + d * 0.58 },
+    ]);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.46)";
+    drawPolygon([
+      { x: right.x, y: right.y + d * 0.34 },
+      { x: bottom.x, y: bottom.y + d * 0.34 },
+      { x: bottom.x, y: bottom.y + d * 0.56 },
+      { x: right.x, y: right.y + d * 0.56 },
+    ]);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
     const topGradient = ctx.createLinearGradient(p.x - r, p.y - h, p.x + r, p.y + h);
     topGradient.addColorStop(0, block.colors.trim);
     topGradient.addColorStop(0.24, block.colors.top);
@@ -1081,8 +1375,8 @@
     drawPolygon([top, right, bottom, left]);
     ctx.fill();
 
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.42)";
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(35, 42, 51, 0.18)";
     drawPolygon([top, right, bottom, left]);
     ctx.stroke();
 
@@ -1216,24 +1510,36 @@
   function drawPlayerShadow(p, lift, alpha) {
     const distance = clamp(lift / 190, 0, 1);
     const castScale = clamp(1 - distance * 0.55, 0.42, 1);
-    const castX = p.x - 18 - lift * 0.08;
-    const castY = p.y + 12 + lift * 0.05;
+    const press = clamp((game.player.scaleX - 1) * 3.4, 0, 0.95);
+    const castLength = (48 + lift * 0.22) * castScale * (1 + press * 0.18);
+    const offset = { x: -castLength, y: castLength * SHADOW_SLOPE };
+    const foot = [
+      { x: p.x, y: p.y - 6 + press * 4 },
+      { x: p.x - 18 * castScale, y: p.y + 2 + press * 3 },
+      { x: p.x, y: p.y + 9 + press * 2 },
+      { x: p.x + 18 * castScale, y: p.y + 2 + press * 3 },
+    ];
 
     ctx.save();
-    ctx.globalAlpha = alpha * clamp(0.26 - distance * 0.18, 0.05, 0.26);
-    ctx.fillStyle = "#4f5a55";
-    ctx.translate(castX, castY);
-    ctx.rotate(-0.28);
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 36 * castScale, 10 * castScale, 0, 0, Math.PI * 2);
+    ctx.globalAlpha = alpha * clamp(0.24 - distance * 0.15, 0.05, 0.24);
+    ctx.fillStyle = "#817674";
+    drawPolygon([
+      foot[0],
+      foot[1],
+      foot[2],
+      foot[3],
+      translatePoint(foot[3], offset),
+      translatePoint(foot[2], offset),
+      translatePoint(foot[1], offset),
+      translatePoint(foot[0], offset),
+    ]);
     ctx.fill();
     ctx.restore();
 
     ctx.save();
-    ctx.globalAlpha = alpha * clamp(0.22 - distance * 0.18, 0.02, 0.22);
-    ctx.fillStyle = "#203230";
-    ctx.beginPath();
-    ctx.ellipse(p.x - 2, p.y + 2, 18 * castScale, 4.8 * castScale, 0, 0, Math.PI * 2);
+    ctx.globalAlpha = alpha * clamp(0.16 - distance * 0.12, 0.02, 0.16);
+    ctx.fillStyle = "#6f6664";
+    drawPolygon(foot);
     ctx.fill();
     ctx.restore();
   }
@@ -1251,60 +1557,60 @@
     ctx.scale(game.player.scaleX, game.player.scaleY);
     ctx.globalAlpha = alpha;
 
-    const baseGradient = ctx.createLinearGradient(-20, -10, 20, 5);
+    const baseGradient = ctx.createLinearGradient(-22, -11, 22, 6);
     baseGradient.addColorStop(0, "#566788");
     baseGradient.addColorStop(0.52, "#26354d");
     baseGradient.addColorStop(1, "#182338");
     ctx.fillStyle = baseGradient;
     ctx.beginPath();
-    ctx.ellipse(0, -1.5, 20, 7.2, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, -1.5, 22, 8.2, 0, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.fillStyle = "#182338";
     ctx.beginPath();
-    ctx.ellipse(0, -10, 15.5, 5.2, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, -12, 17, 5.8, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    const bodyGradient = ctx.createLinearGradient(-16, -58, 18, -9);
+    const bodyGradient = ctx.createLinearGradient(-18, -72, 20, -10);
     bodyGradient.addColorStop(0, "#8da0c6");
     bodyGradient.addColorStop(0.48, "#4b5f86");
     bodyGradient.addColorStop(1, "#23324e");
     ctx.fillStyle = bodyGradient;
     ctx.beginPath();
-    ctx.moveTo(-7, -50);
-    ctx.bezierCurveTo(-16, -44, -14, -17, -10.5, -9);
-    ctx.quadraticCurveTo(0, -4, 10.5, -9);
-    ctx.bezierCurveTo(14, -17, 16, -44, 7, -50);
+    ctx.moveTo(-8, -62);
+    ctx.bezierCurveTo(-18, -54, -15.5, -20, -11.5, -10);
+    ctx.quadraticCurveTo(0, -4.2, 11.5, -10);
+    ctx.bezierCurveTo(15.5, -20, 18, -54, 8, -62);
     ctx.closePath();
     ctx.fill();
 
-    const neckGradient = ctx.createLinearGradient(-10, -53, 10, -43);
+    const neckGradient = ctx.createLinearGradient(-11, -66, 11, -54);
     neckGradient.addColorStop(0, "#7285ad");
     neckGradient.addColorStop(1, "#30415f");
     ctx.fillStyle = neckGradient;
     ctx.beginPath();
-    ctx.ellipse(0, -49, 9.6, 5, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, -61, 10.8, 5.7, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    const headGradient = ctx.createRadialGradient(-5, -70, 2, 0, -66, 15);
+    const headGradient = ctx.createRadialGradient(-5, -86, 2, 0, -80, 16.5);
     headGradient.addColorStop(0, "#c4d1ec");
     headGradient.addColorStop(0.55, "#607499");
     headGradient.addColorStop(1, "#25334d");
     ctx.fillStyle = headGradient;
     ctx.beginPath();
-    ctx.arc(0, -66, 13.5, 0, Math.PI * 2);
+    ctx.arc(0, -80, 15, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.fillStyle = "rgba(255, 255, 255, 0.34)";
     ctx.beginPath();
-    ctx.ellipse(-5.4, -71, 3.2, 6, -0.4, 0, Math.PI * 2);
+    ctx.ellipse(-6, -86, 3.6, 6.8, -0.4, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.strokeStyle = "rgba(255, 178, 56, 0.82)";
     ctx.lineWidth = 2.4;
     ctx.beginPath();
-    ctx.moveTo(-13, -24);
-    ctx.quadraticCurveTo(0, -18, 13, -24);
+    ctx.moveTo(-14, -31);
+    ctx.quadraticCurveTo(0, -24, 14, -31);
     ctx.stroke();
 
     ctx.restore();
@@ -1327,7 +1633,11 @@
 
   function drawParticles() {
     for (const particle of game.particles) {
+      if (particle.delay > 0) {
+        continue;
+      }
       const p = worldToScreen(particle);
+      p.y += particle.screenOffsetY || 0;
       const t = clamp(particle.life / particle.maxLife, 0, 1);
       ctx.save();
       ctx.globalAlpha = t;
@@ -1390,9 +1700,11 @@
   window.addEventListener("pointercancel", onPointerUp);
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
-  restartButton.addEventListener("click", resetGame);
+  restartButton.addEventListener("click", () => resetGame(false));
+  startButton.addEventListener("click", startGame);
+  againButton.addEventListener("click", startGame);
 
   resize();
-  resetGame();
+  resetGame(true);
   requestAnimationFrame(loop);
 })();
