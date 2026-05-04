@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>轻跳一下</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="game-shell" aria-label="轻跳一下小游戏">
+      <canvas id="gameCanvas"></canvas>
+
+      <header class="brand" aria-label="游戏标题">
+        <span>轻跳一下</span>
+      </header>
+
+      <div class="credit" aria-label="游戏开发者">游戏开发者：井永浩</div>
+      <div class="system-capsule" aria-hidden="true">
+        <span class="capsule-dots"></span>
+        <span class="capsule-ring"></span>
+      </div>
+
+      <section class="hud" aria-live="polite">
+        <div class="score-block">
+          <span class="label">分数</span>
+          <strong id="score">0</strong>
+        </div>
+        <div class="score-block">
+          <span class="label">最佳</span>
+          <strong id="bestScore">0</strong>
+        </div>
+      </section>
+
+      <div class="charge-wrap" aria-hidden="true">
+        <div id="chargeBar" class="charge-bar"></div>
+      </div>
+
+      <div id="tip" class="tip is-hidden"></div>
+
+      <button id="restartButton" class="restart-button" type="button" hidden>重开</button>
+
+      <section id="startOverlay" class="menu-overlay" aria-label="开始界面">
+        <div class="menu-panel">
+          <span class="menu-kicker">游戏开发者：井永浩</span>
+          <h1>轻跳一下</h1>
+          <button id="startButton" class="menu-button" type="button">开始游戏</button>
+        </div>
+      </section>
+
+      <section id="gameoverOverlay" class="menu-overlay is-hidden" aria-label="结束界面">
+        <div class="menu-panel">
+          <span class="menu-kicker">本局分数</span>
+          <strong id="finalScore" class="final-score">0</strong>
+          <button id="againButton" class="menu-button" type="button">再来一局</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="game.js"></script>
+  </body>
+</html>
