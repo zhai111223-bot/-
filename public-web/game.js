@@ -100,6 +100,8 @@
     let chargeOsc = null;
     let chargeGain = null;
     let chargeFilter = null;
+    let chargeLfo = null;
+    let chargeLfoGain = null;
 
     function ensure() {
       if (!AudioClass) {
@@ -136,8 +138,15 @@
       chargeOsc = context.createOscillator();
       chargeGain = context.createGain();
       chargeFilter = context.createBiquadFilter();
+      chargeLfo = context.createOscillator();
+      chargeLfoGain = context.createGain();
       chargeOsc.type = "sine";
       chargeOsc.frequency.setValueAtTime(180, context.currentTime);
+      chargeLfo.type = "sine";
+      chargeLfo.frequency.setValueAtTime(8, context.currentTime);
+      chargeLfoGain.gain.setValueAtTime(1.5, context.currentTime);
+      chargeLfo.connect(chargeLfoGain);
+      chargeLfoGain.connect(chargeOsc.frequency);
       chargeFilter.type = "lowpass";
       chargeFilter.frequency.setValueAtTime(1100, context.currentTime);
       chargeGain.gain.setValueAtTime(0.0001, context.currentTime);
@@ -146,6 +155,7 @@
       chargeFilter.connect(chargeGain);
       chargeGain.connect(context.destination);
       chargeOsc.start();
+      chargeLfo.start();
     }
 
     function updateCharge(power) {
@@ -157,6 +167,10 @@
       chargeOsc.frequency.setTargetAtTime(frequency, now, 0.03);
       chargeFilter.frequency.setTargetAtTime(900 + power * 1300, now, 0.04);
       chargeGain.gain.setTargetAtTime(0.035 + power * 0.06, now, 0.04);
+      if (chargeLfo && chargeLfoGain) {
+        chargeLfo.frequency.setTargetAtTime(7 + power * 7, now, 0.05);
+        chargeLfoGain.gain.setTargetAtTime(1.5 + power * 9, now, 0.05);
+      }
     }
 
     function stopCharge() {
@@ -165,13 +179,19 @@
       }
       const osc = chargeOsc;
       const gain = chargeGain;
+      const lfo = chargeLfo;
       const now = audioContext.currentTime;
       gain.gain.cancelScheduledValues(now);
       gain.gain.setTargetAtTime(0.0001, now, 0.035);
       osc.stop(now + 0.12);
+      if (lfo) {
+        lfo.stop(now + 0.12);
+      }
       chargeOsc = null;
       chargeGain = null;
       chargeFilter = null;
+      chargeLfo = null;
+      chargeLfoGain = null;
     }
 
     function playJump(power) {
@@ -199,6 +219,29 @@
       clickGain.connect(context.destination);
       click.start(now);
       click.stop(now + 0.07);
+
+      const whoosh = context.createBufferSource();
+      const whooshGain = context.createGain();
+      const whooshFilter = context.createBiquadFilter();
+      const duration = 0.16 + power * 0.08;
+      const frameCount = Math.max(1, Math.floor(context.sampleRate * duration));
+      const buffer = context.createBuffer(1, frameCount, context.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < frameCount; i += 1) {
+        const fade = 1 - i / frameCount;
+        data[i] = (Math.random() * 2 - 1) * fade * fade;
+      }
+      whoosh.buffer = buffer;
+      whooshFilter.type = "bandpass";
+      whooshFilter.frequency.setValueAtTime(520 + power * 900, now);
+      whooshFilter.Q.setValueAtTime(0.9, now);
+      whooshGain.gain.setValueAtTime(0.025 + power * 0.035, now);
+      whooshGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      whoosh.connect(whooshFilter);
+      whooshFilter.connect(whooshGain);
+      whooshGain.connect(context.destination);
+      whoosh.start(now);
+      whoosh.stop(now + duration);
     }
 
     function playLand(kind = "normal") {
@@ -215,6 +258,17 @@
       osc.connect(gain);
       osc.start(now);
       osc.stop(now + (isPerfect ? 0.38 : 0.2));
+
+      const knock = context.createOscillator();
+      const knockGain = context.createGain();
+      knock.type = "square";
+      knock.frequency.setValueAtTime(isPerfect ? 184 : 118, now);
+      knockGain.gain.setValueAtTime(isPerfect ? 0.035 : 0.052, now);
+      knockGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
+      knock.connect(knockGain);
+      knockGain.connect(context.destination);
+      knock.start(now);
+      knock.stop(now + 0.07);
     }
 
     function playMiss() {
@@ -748,12 +802,13 @@
     const z = game.player.z;
     const alpha = game.player.alpha;
     const lift = Math.max(z, 0);
+    const shadowScale = clamp(1 - lift / 170, 0.35, 1);
 
     ctx.save();
-    ctx.globalAlpha = clamp(alpha * (1 - lift / 190), 0, 0.24);
-    ctx.fillStyle = "#243936";
+    ctx.globalAlpha = clamp(alpha * (1 - lift / 190), 0, 0.2);
+    ctx.fillStyle = "#233936";
     ctx.beginPath();
-    ctx.ellipse(p.x, p.y + 11, 27, 9, 0, 0, Math.PI * 2);
+    ctx.ellipse(p.x, p.y + 3, 20 * shadowScale, 5.8 * shadowScale, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
@@ -765,49 +820,49 @@
 
     ctx.fillStyle = "#222a36";
     ctx.beginPath();
-    ctx.ellipse(0, -9, 17, 7, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, -1.5, 17, 6.4, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    const bodyGradient = ctx.createLinearGradient(-16, -54, 20, -12);
+    const bodyGradient = ctx.createLinearGradient(-16, -48, 20, -7);
     bodyGradient.addColorStop(0, "#5d6f91");
     bodyGradient.addColorStop(0.55, "#30405c");
     bodyGradient.addColorStop(1, "#1d2637");
     ctx.fillStyle = bodyGradient;
-    roundedRect(-15, -45, 30, 38, 13);
+    roundedRect(-15, -39, 30, 35, 13);
     ctx.fill();
 
     ctx.fillStyle = "#ffb238";
-    roundedRect(-16, -32, 32, 7, 4);
+    roundedRect(-16, -25, 32, 7, 4);
     ctx.fill();
 
     ctx.fillStyle = "#f7f2df";
     ctx.beginPath();
-    ctx.arc(0, -55, 13, 0, Math.PI * 2);
+    ctx.arc(0, -49, 13, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.fillStyle = "#38445f";
     ctx.beginPath();
-    ctx.arc(0, -62, 11, Math.PI, 0);
-    ctx.lineTo(12, -55);
-    ctx.quadraticCurveTo(1, -58, -12, -55);
+    ctx.arc(0, -56, 11, Math.PI, 0);
+    ctx.lineTo(12, -49);
+    ctx.quadraticCurveTo(1, -52, -12, -49);
     ctx.closePath();
     ctx.fill();
 
     ctx.fillStyle = "#1f2937";
     ctx.beginPath();
-    ctx.arc(-4, -56, 1.8, 0, Math.PI * 2);
-    ctx.arc(5, -56, 1.8, 0, Math.PI * 2);
+    ctx.arc(-4, -50, 1.8, 0, Math.PI * 2);
+    ctx.arc(5, -50, 1.8, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.strokeStyle = "rgba(31, 41, 55, 0.55)";
     ctx.lineWidth = 1.6;
     ctx.beginPath();
-    ctx.arc(1, -52, 4, 0.2, Math.PI - 0.2);
+    ctx.arc(1, -46, 4, 0.2, Math.PI - 0.2);
     ctx.stroke();
 
     ctx.fillStyle = "rgba(255, 255, 255, 0.28)";
     ctx.beginPath();
-    ctx.ellipse(-6, -38, 4, 10, -0.25, 0, Math.PI * 2);
+    ctx.ellipse(-6, -32, 4, 9, -0.25, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.restore();
